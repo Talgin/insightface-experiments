@@ -199,6 +199,9 @@ def main(args):
             lr_scheduler.step()
 
             with torch.no_grad():
+                loss_am.update(loss.item(), 1)
+                callback_logging(global_step, loss_am, epoch, cfg.fp16, lr_scheduler.get_last_lr()[0], amp)
+
                 if wandb_logger:
                     wandb_logger.log({
                         'Loss/Step Loss': loss.item(),
@@ -206,9 +209,6 @@ def main(args):
                         'Process/Step': global_step,
                         'Process/Epoch': epoch
                     })
-                    
-                loss_am.update(loss.item(), 1)
-                callback_logging(global_step, loss_am, epoch, cfg.fp16, lr_scheduler.get_last_lr()[0], amp)
 
                 if global_step % cfg.verbose == 0 and global_step > 0:
                     callback_verification(global_step, backbone)
