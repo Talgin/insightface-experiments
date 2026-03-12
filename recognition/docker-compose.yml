@@ -6,12 +6,15 @@ services:
     stdin_open: true
     tty: true
     working_dir: /workspace/arcface_torch
-    command: "torchrun --nproc_per_node=3 train_v2.py configs/merged_ms1m_glint_r100"
+    # command: "torchrun --nproc_per_node=3 train_v2.py configs/merged_ms1m_glint_r100"
     environment:
       - OMP_NUM_THREADS=1
       - WANDB_API_KEY=${WANDB_API_KEY}
       - WANDB_ENTITY=${WANDB_ENTITY}
       - WANDB_PROJECT=${WANDB_PROJECT}
+    ports:
+      - "6006:6006" # TensorBoard
+      - "12345:12345" # For distributed training
     deploy:
       resources:
         reservations:
@@ -21,7 +24,7 @@ services:
               capabilities: [gpu]
     volumes:
       - .:/workspace
-      - /data/datasets/recognition:/datasets
+      - /home/svision/datasets/recognition:/datasets
       - /home/svision/experiments/recognition/output:/output
     shm_size: '16g'
     networks:

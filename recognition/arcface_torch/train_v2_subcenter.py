@@ -1,3 +1,12 @@
+"""
+Sub-center ArcFace training script.
+
+This is a variant of train_v2.py that uses Sub-center ArcFace (K sub-centers
+per class) for improved robustness to noisy labels and intra-class variation.
+
+Usage:
+    torchrun --nproc_per_node=3 train_v2_subcenter.py configs/subcenter_merged_ms1m_glint_r100
+"""
 import argparse
 import logging
 import os
@@ -10,7 +19,7 @@ from backbones import get_model
 from dataset import get_dataloader
 from losses import CombinedMarginLoss
 from lr_scheduler import PolynomialLRWarmup
-from partial_fc_v2 import PartialFC_V2
+from partial_fc_v2_subcenter import PartialFC_V2_SubCenter
 from torch import distributed
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -113,26 +122,31 @@ def main(args):
         cfg.interclass_filtering_threshold
     )
 
+    # Sub-center count (default 3 per the paper)
+    num_subcenters = getattr(cfg, 'num_subcenters', 3)
+    logging.info(f"Using Sub-center ArcFace with K={num_subcenters} sub-centers per class")
+
     if cfg.optimizer == "sgd":
-        module_partial_fc = PartialFC_V2(
+        module_partial_fc = PartialFC_V2_SubCenter(
             margin_loss, cfg.embedding_size, cfg.num_classes,
-            cfg.sample_rate, False)
+            num_subcenters=num_subcenters,
+            sample_rate=cfg.sample_rate, fp16=False)
         module_partial_fc.train().cuda()
-        # TODO the params of partial fc must be last in the params list
         opt = torch.optim.SGD(
             params=[{"params": backbone.parameters()}, {"params": module_partial_fc.parameters()}],
             lr=cfg.lr, momentum=0.9, weight_decay=cfg.weight_decay)
 
     elif cfg.optimizer == "adamw":
-        module_partial_fc = PartialFC_V2(
+        module_partial_fc = PartialFC_V2_SubCenter(
             margin_loss, cfg.embedding_size, cfg.num_classes,
-            cfg.sample_rate, False)
+            num_subcenters=num_subcenters,
+            sample_rate=cfg.sample_rate, fp16=False)
         module_partial_fc.train().cuda()
         opt = torch.optim.AdamW(
             params=[{"params": backbone.parameters()}, {"params": module_partial_fc.parameters()}],
             lr=cfg.lr, weight_decay=cfg.weight_decay)
     else:
-        raise
+        raise ValueError(f"Unknown optimizer: {cfg.optimizer}")
 
     cfg.total_batch_size = cfg.batch_size * world_size
     cfg.warmup_step = cfg.num_image // cfg.total_batch_size * cfg.warmup_epoch
@@ -253,6 +267,19 @@ def main(args):
         if cfg.dali:
             train_loader.reset()
 
+    # ----- Always save sub-center FC weights (needed for the drop step) -----
+    # Each rank saves its own portion; the drop script will concatenate them.
+    fc_path = os.path.join(cfg.output, f"subcenter_fc_gpu_{rank}.pt")
+    torch.save({
+        "weight": module_partial_fc.weight.data.cpu(),
+        "num_local": module_partial_fc.num_local,
+        "class_start": module_partial_fc.class_start,
+        "num_subcenters": num_subcenters,
+        "embedding_size": cfg.embedding_size,
+        "num_classes": cfg.num_classes,
+    }, fc_path)
+    logging.info(f"Saved sub-center FC weights: {fc_path}")
+
     if rank == 0:
         path_module = os.path.join(cfg.output, "model.pt")
         torch.save(backbone.module.state_dict(), path_module)
@@ -263,11 +290,12 @@ def main(args):
             model.add_file(path_module)
             wandb_logger.log_artifact(model)
 
+    distributed.barrier()  # ensure all ranks finish saving before exit
 
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     parser = argparse.ArgumentParser(
-        description="Distributed Arcface Training in Pytorch")
+        description="Distributed Sub-center Arcface Training in Pytorch")
     parser.add_argument("config", type=str, help="py config file")
     main(parser.parse_args())
