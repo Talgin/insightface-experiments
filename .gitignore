@@ -106,3 +106,12 @@ ENV/
 .DS_Store
 
 model_zoo/detection/*.params
+*.params
+*.bin
+*.onnx
+*.onnx.bin
+*.onnx.params
+*.pth
+*.pt
+*.ckpt
+*.log
