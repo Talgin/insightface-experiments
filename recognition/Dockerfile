@@ -27,17 +27,26 @@ RUN python3 -m pip install \
 
 # ---- Your packages ----
 RUN python3 -m pip install \
-    "numpy<1.24" \
+    "numpy==1.24.4" \
     tensorboard \
     easydict \
     mxnet \
     onnx \
     onnxruntime-gpu \
     scikit-learn \
+    scikit-image \
+    Cython \
     tqdm \
     wandb \
     gdown \
     "opencv-python-headless<4.10"
+
+RUN python3 -m pip install -e /insightface/python-package
+RUN python3 -m pip install onnxruntime-gpu tqdm
+
+COPY ../* /insightface
+WORKDIR /insightface/detection/retinaface/rcnn/cython
+RUN python3 setup.py build_ext --inplace
 
 # Put code into the image
 WORKDIR /workspace

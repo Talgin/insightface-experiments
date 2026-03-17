@@ -23,9 +23,11 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      - .:/workspace
+      - ../:/insightface
+      - ./:/workspace
       - /home/svision/datasets/recognition:/datasets
       - /home/svision/experiments/recognition/output:/output
+      - /data/datasets/recognition:/hdd_datasets
     shm_size: '16g'
     networks:
       - svision_experiments

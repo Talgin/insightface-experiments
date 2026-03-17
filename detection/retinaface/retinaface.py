@@ -8,12 +8,12 @@ import mxnet as mx
 from mxnet import ndarray as nd
 import cv2
 #from rcnn import config
-from rcnn.logger import logger
+from .rcnn.logger import logger
 #from rcnn.processing.bbox_transform import nonlinear_pred, clip_boxes, landmark_pred
-from rcnn.processing.bbox_transform import clip_boxes
-from rcnn.processing.generate_anchor import generate_anchors_fpn, anchors_plane
-from rcnn.processing.nms import gpu_nms_wrapper, cpu_nms_wrapper
-from rcnn.processing.bbox_transform import bbox_overlaps
+from .rcnn.processing.bbox_transform import clip_boxes
+from .rcnn.processing.generate_anchor import generate_anchors_fpn, anchors_plane
+from .rcnn.processing.nms import gpu_nms_wrapper, cpu_nms_wrapper
+from .rcnn.processing.bbox_transform import bbox_overlaps
 
 
 class RetinaFace:

@@ -76,17 +76,26 @@ def load_subcenter_weights(fc_dir, num_classes, num_subcenters=3, embedding_size
     Returns:
         W: numpy array of shape (num_classes, K, embedding_size), L2-normalized
     """
+    # Try standalone FC files first, then fall back to full checkpoint files
     fc_files = sorted(glob.glob(os.path.join(fc_dir, 'subcenter_fc_gpu_*.pt')))
-    if len(fc_files) == 0:
+    ckpt_files = sorted(glob.glob(os.path.join(fc_dir, 'checkpoint_gpu_*.pt')))
+
+    if len(fc_files) > 0:
+        return _load_from_standalone_fc(fc_files, num_classes, num_subcenters, embedding_size)
+    elif len(ckpt_files) > 0:
+        return _load_from_checkpoints(ckpt_files, num_classes, num_subcenters, embedding_size)
+    else:
         raise FileNotFoundError(
-            f"No subcenter_fc_gpu_*.pt files found in {fc_dir}.\n"
-            "These are saved by train_v2_subcenter.py at the end of training.\n"
+            f"No subcenter_fc_gpu_*.pt or checkpoint_gpu_*.pt files found in {fc_dir}.\n"
+            "These are saved by train_v2_subcenter.py during/after training.\n"
             "If you trained without this feature, use recover_subcenter_fc.py to recover them."
         )
 
-    logger.info(f"Loading sub-center FC weights from {len(fc_files)} files...")
 
-    # Sort by class_start to ensure correct order
+def _load_from_standalone_fc(fc_files, num_classes, num_subcenters, embedding_size):
+    """Load from standalone subcenter_fc_gpu_*.pt files."""
+    logger.info(f"Loading sub-center FC weights from {len(fc_files)} standalone files...")
+
     parts = []
     for f in fc_files:
         data = torch.load(f, map_location='cpu')
@@ -97,25 +106,54 @@ def load_subcenter_weights(fc_dir, num_classes, num_subcenters=3, embedding_size
     emb = parts[0]['embedding_size']
     logger.info(f"  K={K}, embedding_size={emb}")
 
-    # Concatenate weights from all GPUs
-    # Each part has weight of shape (num_local * K, embedding_size)
     all_weights = []
     total_classes = 0
     for p in parts:
-        w = p['weight'].numpy()  # (num_local * K, emb)
+        w = p['weight'].numpy()
         num_local = p['num_local']
         total_classes += num_local
         all_weights.append(w)
-    
-    W = np.concatenate(all_weights, axis=0)  # (total_classes * K, emb)
+
+    W = np.concatenate(all_weights, axis=0)
     logger.info(f"  Total weight shape: {W.shape}, total classes from weights: {total_classes}")
-    
+
     if total_classes < num_classes:
         logger.warning(f"  Weight covers {total_classes} classes but dataset has {num_classes}")
-    
-    # L2-normalize
+
     W = sklearn.preprocessing.normalize(W)
-    # Reshape to (num_classes, K, emb)
+    W = W.reshape(-1, K, emb)
+    logger.info(f"  Final W shape: {W.shape}")
+    return W
+
+
+def _load_from_checkpoints(ckpt_files, num_classes, num_subcenters, embedding_size):
+    """Load from full checkpoint_gpu_*.pt files (saved with save_all_states=True)."""
+    logger.info(f"Loading sub-center FC weights from {len(ckpt_files)} checkpoint files...")
+
+    K = num_subcenters
+    emb = embedding_size
+
+    # Load and sort by GPU rank (filename order: checkpoint_gpu_0, _1, _2, ...)
+    all_weights = []
+    total_classes = 0
+    for f in ckpt_files:
+        logger.info(f"  Loading {os.path.basename(f)}...")
+        ckpt = torch.load(f, map_location='cpu')
+        fc_state = ckpt['state_dict_softmax_fc']
+        w = fc_state['weight'].numpy()  # (num_local * K, embedding_size)
+        num_local = w.shape[0] // K
+        total_classes += num_local
+        all_weights.append(w)
+        logger.info(f"    weight shape: {w.shape}, num_local: {num_local}")
+        del ckpt  # free memory (checkpoints are large)
+
+    W = np.concatenate(all_weights, axis=0)
+    logger.info(f"  Total weight shape: {W.shape}, total classes from checkpoints: {total_classes}")
+
+    if total_classes < num_classes:
+        logger.warning(f"  Weight covers {total_classes} classes but dataset has {num_classes}")
+
+    W = sklearn.preprocessing.normalize(W)
     W = W.reshape(-1, K, emb)
     logger.info(f"  Final W shape: {W.shape}")
     return W
